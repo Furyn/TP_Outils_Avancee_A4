@@ -9,7 +9,10 @@ public class CustomAnimatorWindow : EditorWindow
     bool[] allDisplay;
 
     Dictionary<Animator, AnimationClip> clipPlayByAnimator = new Dictionary<Animator, AnimationClip>();
+    Dictionary<Animator, bool> boolAutoAnimator = new Dictionary<Animator, bool>();
     Dictionary<AnimationClip, float> clipCurrentTime = new Dictionary<AnimationClip, float>();
+
+    static PlayModeStateChange stateMode = PlayModeStateChange.EnteredEditMode;
 
     double tmp_time = 0;
 
@@ -20,8 +23,10 @@ public class CustomAnimatorWindow : EditorWindow
         // Get existing open window or if none, make a new one:
         CustomAnimatorWindow window = (CustomAnimatorWindow)EditorWindow.GetWindow(typeof(CustomAnimatorWindow));
         window.Show();
-        //EditorApplication.update = EditorUpdate;
     }
+
+    void OnEnable() { EditorApplication.update += UpdateAnimation; EditorApplication.playModeStateChanged += playModeState; }
+    void OnDisable() { EditorApplication.update -= UpdateAnimation; EditorApplication.playModeStateChanged -= playModeState; }
 
     void OnGUI()
     {
@@ -33,9 +38,18 @@ public class CustomAnimatorWindow : EditorWindow
             allDisplay = new bool[allAnimator.Length];
             clipPlayByAnimator.Clear();
             clipCurrentTime.Clear();
+            boolAutoAnimator.Clear();
+            foreach (Animator item in allAnimator)
+            {
+                boolAutoAnimator[item] = true;
+            }
             AnimationMode.StopAnimationMode();
         }
-        AnimationMode.StartAnimationMode();
+
+        if (stateMode == PlayModeStateChange.EnteredEditMode)
+        {
+            AnimationMode.StartAnimationMode();
+        }
 
         foreach (Animator item in allAnimator)
         {
@@ -89,41 +103,103 @@ public class CustomAnimatorWindow : EditorWindow
                     
                     foreach (AnimationClip clip in allClip)
                     {
-                        if (GUILayout.Button(clip.name))
+                        if (GUILayout.Button(clip.name) && stateMode == PlayModeStateChange.EnteredEditMode)
                         {
-                            Debug.Log("Play anim '" + clip.name + "' on the " + allAnimator[i]);
                             clipPlayByAnimator[allAnimator[i]] = clip;
                             clipCurrentTime[clip] = 0;
                         }
                     }
+                    GUILayout.EndHorizontal();
+
+                    GUILayout.BeginHorizontal();
+                    if (clipPlayByAnimator.ContainsKey(allAnimator[i]))
+                    {
+                        if (boolAutoAnimator.Count == 0)
+                        {
+                            foreach (Animator item in allAnimator)
+                            {
+                                boolAutoAnimator[item] = true;
+                            }
+                        }
+                        if (boolAutoAnimator[allAnimator[i]])
+                        {
+                            EditorGUILayout.Slider(clipCurrentTime[clipPlayByAnimator[allAnimator[i]]], 0, clipPlayByAnimator[allAnimator[i]].length);
+                        }
+                        else
+                        {
+                            clipCurrentTime[clipPlayByAnimator[allAnimator[i]]] = EditorGUILayout.Slider(clipCurrentTime[clipPlayByAnimator[allAnimator[i]]], 0, clipPlayByAnimator[allAnimator[i]].length);
+                        }
+                        string textAuto = "Auto Mode";
+                        if (!boolAutoAnimator[allAnimator[i]])
+                        {
+                            textAuto = "Slider Mode";
+                        }
+                        if (GUILayout.Button(textAuto))
+                        {
+                            boolAutoAnimator[allAnimator[i]] = !boolAutoAnimator[allAnimator[i]];
+                        }
+                    }
+                    GUILayout.EndHorizontal();
+
                 }
                 else
                 {
                     GUILayout.Label("None", GUI.skin.button);
                 }
-                GUILayout.EndHorizontal();
             }
         }
     }
 
-    /*public static void EditorUpdate()
+    public void UpdateAnimation()
     {
-        double timeToSave = EditorApplication.timeSinceStartup - window.tmp_time;
-        window.PlayAnimation(timeToSave);
-        window.tmp_time = EditorApplication.timeSinceStartup;
-    }*/
+        double timeToSave = EditorApplication.timeSinceStartup - tmp_time;
+        PlayAnimation(timeToSave);
+        tmp_time = EditorApplication.timeSinceStartup;
+    }
 
     private void PlayAnimation(double time)
     {
-        if (clipPlayByAnimator.Count == 0)
+        if (clipPlayByAnimator.Count == 0 || !AnimationMode.InAnimationMode())
         {
             return;
         }
+        bool repaint = false;
         foreach (KeyValuePair<Animator, AnimationClip> item in clipPlayByAnimator)
         {
-            Debug.Log(time);
-            clipCurrentTime[item.Value] += (float)time;
+            if (boolAutoAnimator[item.Key])
+            {
+                clipCurrentTime[item.Value] += (float)time;
+                if (clipCurrentTime[item.Value] >= item.Value.length)
+                {
+                    clipCurrentTime[item.Value] = 0;
+                }
+            }
             AnimationMode.SampleAnimationClip(item.Key.gameObject, item.Value, clipCurrentTime[item.Value]);
+            if (boolAutoAnimator[item.Key])
+            {
+                repaint = true;
+            }
+        }
+
+        if (repaint)
+        {
+            Repaint();
+        }
+
+    }
+
+    private static void playModeState(PlayModeStateChange state)
+    {
+        if (state == PlayModeStateChange.EnteredPlayMode)
+        {
+            AnimationMode.StopAnimationMode();
+            stateMode = state;
+        }
+
+        if (state == PlayModeStateChange.EnteredEditMode)
+        {
+            AnimationMode.StopAnimationMode();
+            stateMode = state;
         }
     }
 }
