@@ -11,6 +11,7 @@ public class CustomAnimatorWindow : EditorWindow
     Dictionary<Animator, AnimationClip> clipPlayByAnimator = new Dictionary<Animator, AnimationClip>();
     Dictionary<Animator, bool> boolAutoAnimator = new Dictionary<Animator, bool>();
     Dictionary<AnimationClip, float> clipCurrentTime = new Dictionary<AnimationClip, float>();
+    Dictionary<AnimationClip, float> clipCurrentSpeed = new Dictionary<AnimationClip, float>();
 
     static PlayModeStateChange stateMode = PlayModeStateChange.EnteredEditMode;
 
@@ -25,8 +26,18 @@ public class CustomAnimatorWindow : EditorWindow
         window.Show();
     }
 
-    void OnEnable() { EditorApplication.update += UpdateAnimation; EditorApplication.playModeStateChanged += playModeState; }
-    void OnDisable() { EditorApplication.update -= UpdateAnimation; EditorApplication.playModeStateChanged -= playModeState; }
+    void OnEnable() 
+    { 
+        EditorApplication.update += UpdateAnimation; 
+        EditorApplication.playModeStateChanged += playModeState;
+        UnityEditor.SceneManagement.EditorSceneManager.sceneOpened += SceneOpened;
+    }
+    void OnDisable() 
+    { 
+        EditorApplication.update -= UpdateAnimation; 
+        EditorApplication.playModeStateChanged -= playModeState;
+        UnityEditor.SceneManagement.EditorSceneManager.sceneOpened -= SceneOpened;
+    }
 
     void OnGUI()
     {
@@ -38,17 +49,12 @@ public class CustomAnimatorWindow : EditorWindow
             allDisplay = new bool[allAnimator.Length];
             clipPlayByAnimator.Clear();
             clipCurrentTime.Clear();
+            clipCurrentSpeed.Clear();
             boolAutoAnimator.Clear();
             foreach (Animator item in allAnimator)
             {
                 boolAutoAnimator[item] = true;
             }
-            AnimationMode.StopAnimationMode();
-        }
-
-        if (stateMode == PlayModeStateChange.EnteredEditMode)
-        {
-            AnimationMode.StartAnimationMode();
         }
 
         foreach (Animator item in allAnimator)
@@ -93,27 +99,50 @@ public class CustomAnimatorWindow : EditorWindow
 
             GUILayout.EndHorizontal();
 
-            GUI.backgroundColor = Color.white;
             if (allDisplay[i] == true)
             {
-                GUILayout.BeginHorizontal();
                 if (allAnimator[i].runtimeAnimatorController != null)
                 {
+                    GUILayout.BeginHorizontal();
                     AnimationClip[] allClip = allAnimator[i].runtimeAnimatorController.animationClips;
-                    
+                    List<AnimationClip> uniq_clip = new List<AnimationClip>();
                     foreach (AnimationClip clip in allClip)
                     {
-                        if (GUILayout.Button(clip.name) && stateMode == PlayModeStateChange.EnteredEditMode)
+                        if (uniq_clip.Contains(clip))
+                        {
+                            continue;
+                        }
+                        uniq_clip.Add(clip);
+                        if (clipPlayByAnimator.ContainsKey(allAnimator[i]) && clipPlayByAnimator[allAnimator[i]] == clip )
+                        {
+                            GUI.backgroundColor = Color.blue;
+                        }
+                        else
+                        {
+                            GUI.backgroundColor = Color.white;
+                        }
+
+                        if (uniq_clip.Count % 5 == 0)
+                        {
+                            GUILayout.EndHorizontal();
+                            GUILayout.BeginHorizontal();
+                        }
+                        if (GUILayout.Button(clip.name, GUILayout.MaxWidth(100)) && stateMode == PlayModeStateChange.EnteredEditMode)
                         {
                             clipPlayByAnimator[allAnimator[i]] = clip;
                             clipCurrentTime[clip] = 0;
+                            if (!clipCurrentSpeed.ContainsKey(clip))
+                            {
+                                clipCurrentSpeed[clip] = allAnimator[i].speed;
+                            }
                         }
                     }
                     GUILayout.EndHorizontal();
 
-                    GUILayout.BeginHorizontal();
+                    GUI.backgroundColor = Color.white;
                     if (clipPlayByAnimator.ContainsKey(allAnimator[i]))
                     {
+                        GUILayout.BeginHorizontal();
                         if (boolAutoAnimator.Count == 0)
                         {
                             foreach (Animator item in allAnimator)
@@ -129,18 +158,43 @@ public class CustomAnimatorWindow : EditorWindow
                         {
                             clipCurrentTime[clipPlayByAnimator[allAnimator[i]]] = EditorGUILayout.Slider(clipCurrentTime[clipPlayByAnimator[allAnimator[i]]], 0, clipPlayByAnimator[allAnimator[i]].length);
                         }
+                        
                         string textAuto = "Auto Mode";
                         if (!boolAutoAnimator[allAnimator[i]])
                         {
                             textAuto = "Slider Mode";
                         }
+                        //GUI.skin.button.wordWrap = false;
                         if (GUILayout.Button(textAuto))
                         {
                             boolAutoAnimator[allAnimator[i]] = !boolAutoAnimator[allAnimator[i]];
                         }
-                    }
-                    GUILayout.EndHorizontal();
+                        GUI.skin.button.wordWrap = true;
 
+                        GUILayout.EndHorizontal();
+                        GUILayout.BeginHorizontal();
+
+                        GUILayout.Label("Boucle animation : ");
+                        bool loop = EditorGUILayout.Toggle(clipPlayByAnimator[allAnimator[i]].wrapMode == WrapMode.Loop);
+                        if (loop)
+                        {
+                            clipPlayByAnimator[allAnimator[i]].wrapMode = WrapMode.Loop;
+                        }
+                        else
+                        {
+                            clipPlayByAnimator[allAnimator[i]].wrapMode = WrapMode.Once;
+                        }
+
+                        GUILayout.Label("Speed : ");
+                        clipCurrentSpeed[clipPlayByAnimator[allAnimator[i]]] = EditorGUILayout.Slider(clipCurrentSpeed[clipPlayByAnimator[allAnimator[i]]], 0, 5);
+
+                        GUILayout.EndHorizontal();
+                        GUILayout.BeginHorizontal();
+
+                        GUILayout.Label("Animation Time : " + clipCurrentTime[clipPlayByAnimator[allAnimator[i]]].ToString("0.000") + "/" + clipPlayByAnimator[allAnimator[i]].length.ToString("0.000"));
+
+                        GUILayout.EndHorizontal();
+                    }
                 }
                 else
                 {
@@ -159,19 +213,36 @@ public class CustomAnimatorWindow : EditorWindow
 
     private void PlayAnimation(double time)
     {
-        if (clipPlayByAnimator.Count == 0 || !AnimationMode.InAnimationMode())
+        if (clipPlayByAnimator.Count == 0)
         {
+            if (AnimationMode.InAnimationMode())
+            {
+                AnimationMode.StopAnimationMode();
+            }
             return;
         }
+
+        if (!AnimationMode.InAnimationMode())
+        {
+            AnimationMode.StartAnimationMode();
+        }
+
         bool repaint = false;
         foreach (KeyValuePair<Animator, AnimationClip> item in clipPlayByAnimator)
         {
             if (boolAutoAnimator[item.Key])
             {
-                clipCurrentTime[item.Value] += (float)time;
+                clipCurrentTime[item.Value] += (float)time * clipCurrentSpeed[item.Value];
                 if (clipCurrentTime[item.Value] >= item.Value.length)
                 {
-                    clipCurrentTime[item.Value] = 0;
+                    if (item.Value.wrapMode == WrapMode.Loop)
+                    {
+                        clipCurrentTime[item.Value] = 0;
+                    }
+                    else
+                    {
+                        clipCurrentTime[item.Value] = item.Value.length;
+                    }
                 }
             }
             AnimationMode.SampleAnimationClip(item.Key.gameObject, item.Value, clipCurrentTime[item.Value]);
@@ -188,18 +259,26 @@ public class CustomAnimatorWindow : EditorWindow
 
     }
 
-    private static void playModeState(PlayModeStateChange state)
+    private void playModeState(PlayModeStateChange state)
     {
         if (state == PlayModeStateChange.EnteredPlayMode)
         {
-            AnimationMode.StopAnimationMode();
+            clipPlayByAnimator.Clear();
+            clipCurrentTime.Clear();
+            clipCurrentSpeed.Clear();
             stateMode = state;
         }
 
         if (state == PlayModeStateChange.EnteredEditMode)
         {
-            AnimationMode.StopAnimationMode();
             stateMode = state;
         }
+    }
+
+    void SceneOpened(UnityEngine.SceneManagement.Scene scene, UnityEditor.SceneManagement.OpenSceneMode mode)
+    {
+        clipPlayByAnimator.Clear();
+        clipCurrentTime.Clear();
+        boolAutoAnimator.Clear();
     }
 }
